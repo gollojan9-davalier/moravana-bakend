@@ -7,7 +7,7 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Habilitar CORS de amplio espectro absoluto para Vercel
+// Configuraci?n absoluta de CORS para Vercel
 app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -80,32 +80,48 @@ app.get('/api/materiales/stock/:locacion_id', (req, res) => {
     });
 });
 
+// API FLEX-FORMAT INDEXADA SIN ERRORES DE SINTAXIS
 app.post('/api/materiales/importar-bloque', (req, res) => {
     const { locacion_id, texto_bruto } = req.body;
     if (!texto_bruto) return res.status(400).json({ error: 'Texto vacio' });
+    
     const lineas = texto_bruto.split('\n');
     let ingresados = 0;
+    
     db.serialize(() => {
         lineas.forEach(linea => {
-            if(!linea.trim()) return;
-            const partes = linea.trim().match(/(.+?)\s+(\d+(?:\.\d+)?)\s*$/);
-            if (partes) {
-                const nombre = partes[1].trim();
-                const cantidad = parseFloat(partes[2]);
-                if (nombre.length > 2 && cantidad >= 0) {
-                    ingresados++;
-                    db.run("INSERT OR IGNORE INTO materiales (nombre, unidad_medida, stock_minimo_alerta) VALUES (?, 'Unidades', 10)", [nombre], function() {
-                        db.get("SELECT id FROM materiales WHERE nombre = ?", [nombre], (err, row) => {
-                            if (row) {
-                                // CORREGIDO: cantidad_actual en lugar de quantity_actual
-                                db.run("INSERT OR REPLACE INTO materiales_stock (material_id, locacion_id, cantidad_actual) VALUES (?, ?, ?)", [row.id, locacion_id, cantidad]);
-                            }
-                        });
+            const l = linea.trim();
+            if (!l) return;
+
+            let nombre = "";
+            let cantidad = 0;
+
+            const matchPrincipio = l.match(/^(\d+(?:\.\d+)?)\s+(.+)$/);
+            const matchFinal = l.match(/^(.+?)\s+(\d+(?:\.\d+)?)$/);
+
+            if (matchPrincipio) {
+                cantidad = parseFloat(matchPrincipio[1]);
+                nombre = matchPrincipio[2].trim();
+            } else if (matchFinal) {
+                nombre = matchFinal[1].trim();
+                cantidad = parseFloat(matchFinal[2]);
+            }
+
+            if (nombre && nombre.length > 2 && !isNaN(cantidad)) {
+                ingresados++;
+                db.run("INSERT OR IGNORE INTO materiales (nombre, unidad_medida, stock_minimo_alerta) VALUES (?, 'Unidades', 10)", [nombre], function() {
+                    db.get("SELECT id FROM materiales WHERE nombre = ?", [nombre], (err, row) => {
+                        if (row) {
+                            db.run("INSERT OR REPLACE INTO materiales_stock (material_id, locacion_id, cantidad_actual) VALUES (?, ?, ?)", [row.id, locacion_id, cantidad]);
+                        }
                     });
-                }
+                });
             }
         });
-        setTimeout(() => res.json({ message: 'Carga masiva completada con exito. Items indexados: ' + ingresados }), 600);
+        
+        setTimeout(() => {
+            res.json({ message: 'Carga masiva completada con exito. Items indexados en la nube: ' + ingresados });
+        }, 800);
     });
 });
 
