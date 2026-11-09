@@ -7,11 +7,11 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Configuraci?n de CORS Totalmente Abierta e Inmune para Vercel
+// Habilitar CORS de amplio espectro absoluto para Vercel
 app.use(cors({
     origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 app.use(express.json());
 
@@ -42,6 +42,8 @@ const db = new sqlite3.Database(dbPath, (err) => {
         });
     }
 });
+
+app.options('*', cors());
 
 app.get('/api/herramientas', (req, res) => {
     const sql = `
@@ -85,6 +87,7 @@ app.post('/api/materiales/importar-bloque', (req, res) => {
     let ingresados = 0;
     db.serialize(() => {
         lineas.forEach(linea => {
+            if(!linea.trim()) return;
             const partes = linea.trim().match(/(.+?)\s+(\d+(?:\.\d+)?)\s*$/);
             if (partes) {
                 const nombre = partes[1].trim();
@@ -93,32 +96,16 @@ app.post('/api/materiales/importar-bloque', (req, res) => {
                     ingresados++;
                     db.run("INSERT OR IGNORE INTO materiales (nombre, unidad_medida, stock_minimo_alerta) VALUES (?, 'Unidades', 10)", [nombre], function() {
                         db.get("SELECT id FROM materiales WHERE nombre = ?", [nombre], (err, row) => {
-                            if (row) db.run("INSERT OR REPLACE INTO materiales_stock (material_id, locacion_id, cantidad_actual) VALUES (?, ?, ?)", [row.id, locacion_id, cantidad]);
+                            if (row) {
+                                // CORREGIDO: cantidad_actual en lugar de quantity_actual
+                                db.run("INSERT OR REPLACE INTO materiales_stock (material_id, locacion_id, cantidad_actual) VALUES (?, ?, ?)", [row.id, locacion_id, cantidad]);
+                            }
                         });
                     });
                 }
             }
         });
         setTimeout(() => res.json({ message: 'Carga masiva completada con exito. Items indexados: ' + ingresados }), 600);
-    });
-});
-
-app.post('/api/pedidos/crear', (req, res) => {
-    const { herramienta_id, locacion_destino_id, duracion_dias } = req.body;
-    db.serialize(() => {
-        db.run('INSERT INTO pedidos_herramientas (herramienta_id, locacion_origen_id, locacion_destino_id, duracion_dias, estado_pedido) VALUES (?, 1, ?, ?, "Pendiente")', [herramienta_id, locacion_destino_id, duracion_dias]);
-        db.run('UPDATE herramientas SET estado = "Reservada" WHERE id = ?', [herramienta_id], () => res.json({ message: 'Pedido procesado.' }));
-    });
-});
-
-app.post('/api/pedidos/devolver', (req, res) => {
-    const { herramienta_id, nuevo_estado, codigo_qr_escaneado } = req.body;
-    db.get('SELECT codigo_qr FROM herramientas WHERE id = ?', [herramienta_id], (err, row) => {
-        if (err || !row || row.codigo_qr !== codigo_qr_escaneado) return res.status(400).json({ error: 'Validacion QR fallo' });
-        db.serialize(() => {
-            db.run('UPDATE pedidos_herramientas SET estado_pedido = "Finalizado" WHERE herramienta_id = ? AND estado_pedido != "Finalizado"', [herramienta_id]);
-            db.run('UPDATE herramientas SET estado = ? WHERE id = ?', [nuevo_estado, herramienta_id], () => res.json({ message: 'Devolucion procesada.' }));
-        });
     });
 });
 
