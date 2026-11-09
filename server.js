@@ -7,10 +7,14 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use(cors());
+// Configuraci?n de CORS Totalmente Abierta e Inmune para Vercel
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
-// Forzar la creaci?n segura del directorio de la base de datos en entornos de nube (como Render)
 const dbDir = path.resolve(__dirname, 'database');
 if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
@@ -21,8 +25,6 @@ const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
         console.error('Error base de datos:', err.message);
     } else {
-        console.log('Conectado exitosamente a la base de datos: ' + dbPath);
-        // Crear las tablas b?sicas de emergencia en la nube si el archivo nace vac?o
         db.serialize(() => {
             db.run('CREATE TABLE IF NOT EXISTS locaciones (id INTEGER PRIMARY KEY, nombre TEXT, tipo TEXT, direccion TEXT)');
             db.run('CREATE TABLE IF NOT EXISTS materiales (id INTEGER PRIMARY KEY, nombre TEXT, unidad_medida TEXT, stock_minimo_alerta INTEGER)');
@@ -30,7 +32,6 @@ const db = new sqlite3.Database(dbPath, (err) => {
             db.run('CREATE TABLE IF NOT EXISTS materiales_stock (id INTEGER PRIMARY KEY AUTOINCREMENT, material_id INTEGER, locacion_id INTEGER, cantidad_actual REAL, UNIQUE(material_id, locacion_id))');
             db.run('CREATE TABLE IF NOT EXISTS pedidos_herramientas (id INTEGER PRIMARY KEY AUTOINCREMENT, herramienta_id INTEGER, locacion_origen_id INTEGER, locacion_destino_id INTEGER, duracion_dias INTEGER, estado_pedido TEXT DEFAULT "Pendiente")');
             
-            // Inyectar de respaldo las locaciones de Inversiones Moravana
             db.run("INSERT OR IGNORE INTO locaciones (id, nombre, tipo, direccion) VALUES " +
                    "(1, 'Almacen Central Cabudare', 'Almacen Central', 'Sede Principal Base'), " +
                    "(2, 'Deposito Externo Planta Chivacoa', 'Deposito Temporal', 'Grupo Polar'), " +
@@ -42,7 +43,6 @@ const db = new sqlite3.Database(dbPath, (err) => {
     }
 });
 
-// Rutas l?gicas de control simuladas para el entorno unificado flotante
 app.get('/api/herramientas', (req, res) => {
     const sql = `
         SELECT h.id, h.nombre, h.codigo_qr, h.estado, l.nombre AS ubicacion_actual
